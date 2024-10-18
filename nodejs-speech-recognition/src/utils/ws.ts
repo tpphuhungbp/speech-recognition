@@ -7,6 +7,8 @@ import { createRequire } from "module";
 
 const openai = new OpenAI();
 
+let audioChunks: Buffer[] = [];
+
 //interface này đại diện cho duy nhất một Websocket
 declare interface Socket extends WebSocket {
   isAlive: boolean;
@@ -29,27 +31,27 @@ const wss = new WebSocketServer({ noServer: true });
 // biến chứa TOÀN BỘ room
 const listWS: ISocketStore[] = [];
 
-async function sendPartialAudio(audioChunks: Buffer[]) {
-  if (audioChunks.length === 0) return;
+async function transcribeBatch(audioBuffer: Buffer) {
+  const audioFileName = `${uuidv4()}.webm`;
+  const audioFilePath = path.join(__dirname, audioFileName);
 
-  const audioFilePath = path.join(__dirname, `${uuidv4()}.webm`);
-  const audioBuffer = Buffer.concat(audioChunks);
-
-  // Write buffer to file
+  // Write the audio buffer to a file
   createWriteStream(audioFilePath).write(audioBuffer);
 
   try {
+    console.log("audio path", audioFilePath);
     const transcript = await openai.audio.transcriptions.create({
-      file: createReadStream(audioFilePath),
-      model: "whisper-1",
-      language: "en",
+      file: createReadStream(audioFileName),
+      model: "whisper-1", // Use Whisper model
+      // language: "en", // Set the language if necessary
     });
-    console.log("Partial Transcription:", transcript.data.text);
+
+    console.log("Partial Transcription:", transcript.text);
+    return transcript.text;
   } catch (error) {
-    console.error("Error in transcription:", error);
+    console.error("Transcription Error:", error);
   } finally {
-    // Clear accumulated chunks after sending
-    audioChunks = [];
+    // Clean up the temporary file
     unlink(audioFilePath, (err) => {
       if (err) console.error("Error deleting file:", err);
     });
@@ -94,15 +96,21 @@ wss.on("connection", async (ws: Socket, req) => {
     ws.isAlive = true;
   });
 
-  ws.on("message", async (message) => {
-    console.log("Received:", message);
+  ws.on("message", async (chunk: Buffer) => {
+    // console.log("Received:", chunk);
+    audioChunks.push(chunk);
+    if (audioChunks.length >= 2) {
+      const combinedAudio = Buffer.concat(audioChunks);
+      audioChunks = []; // Clear the buffer after sending
+      const transcript = await transcribeBatch(combinedAudio);
+      console.log("----transcript end---");
+      // Send the partial transcript back to the client
+      ws.send(JSON.stringify({ text: transcript }));
+    }
   });
   ws.on("close", () => {
     console.log("Client disconnected");
   });
-
-  //speech to Text
-  const audioFilePath = path.join(__dirname, `${uuidv4()}.webm`);
 });
 
 function noop() {}

@@ -57,7 +57,7 @@ const Home = () => {
         }
       };
 
-      mediaRecorderRef.current.start(100); // Start recording with chunk size of 100ms or every 100ms
+      mediaRecorderRef.current.start(2000); // Start recording with chunk size of 100ms or every 100ms
       setIsRecording(true);
     } catch (error) {
       console.error("Error accessing microphone:", error);
